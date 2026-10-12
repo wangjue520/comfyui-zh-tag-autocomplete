@@ -1,0 +1,12 @@
+[project]
+name = "comfyui-zh-tag-autocomplete"
+description = "中文标签补全：在提示词框里直接打中文，弹出 Danbooru 英文标签；字典里没有的中文用谷歌 / DeepSeek 翻译。"
+version = "1.0.0"
+license = { file = "LICENSE" }
+
+[project.urls]
+Repository = "https://github.com/wangjue520/comfyui-zh-tag-autocomplete"
+
+[tool.comfy]
+PublisherId = "wangjue520"
+DisplayName = "ZH Tag Autocomplete"
