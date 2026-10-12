@@ -417,8 +417,8 @@ function translateText(text) {
                     const te = tagForEnglish(en);
                     return (pre + (te ? formatTag(te.tag) : formatPhrase(en)) + post).trim();
                 })
-                .filter((s, i, arr) => s || i < arr.length - 1)
-                .join(", ");
+                .join(", ")
+                .trimEnd(); // 行尾的逗号保留为 ","，不留多余空格
         })
         .join("\n");
 }

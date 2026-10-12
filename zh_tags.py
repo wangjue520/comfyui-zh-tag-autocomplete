@@ -253,5 +253,5 @@ def translate_prompt(text, engine=None):
             lines.append(line)
             continue
         segs = [seg_out(s) for s in re.split(r"[,，、]", line)]
-        lines.append(", ".join(s for i, s in enumerate(segs) if s or i < len(segs) - 1))
+        lines.append(", ".join(segs).rstrip())  # 行尾的逗号保留为 ","
     return "\n".join(lines)
