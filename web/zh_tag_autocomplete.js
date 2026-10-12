@@ -22,6 +22,7 @@ const SETTINGS = [
     { id: "ZhTag.AppendComma", name: "插入后自动追加逗号", type: "boolean", defaultValue: true, section: "补全" },
     { id: "ZhTag.EnglishSearch", name: "输入英文时也弹出补全（自动：已启用 pysssss 自动补全时交给它）", type: "combo", options: ["自动", "开启", "关闭"], defaultValue: "自动", section: "补全" },
     { id: "ZhTag.IncludeArtists", name: "候选中包含画师标签", type: "boolean", defaultValue: true, section: "补全" },
+    { id: "ZhTag.AutoTranslate", name: "实时翻译：打下逗号/换行时，把前一段中文原地换成英文（之后可手动修改）", type: "boolean", defaultValue: true, section: "补全" },
     { id: "ZhTag.Hotkey", name: "一键把中文翻译为标签的快捷键", type: "text", defaultValue: "Alt+T", section: "补全" },
     { id: "ZhTag.Engine", name: "字典里没有的中文用哪个翻译（DeepSeek 失败时自动改用谷歌）", type: "combo", options: ["谷歌", "DeepSeek", "关闭"], defaultValue: "谷歌", section: "翻译", backend: "engine" },
     { id: "ZhTag.Proxy", name: "谷歌翻译使用的代理（如 http://127.0.0.1:7890，留空则用系统环境变量）", type: "text", defaultValue: "", section: "翻译", backend: "proxy" },
@@ -530,6 +531,37 @@ function checkChanged(ta) {
     if (lastSeen.get(ta) === sig) return;
     lastSeen.set(ta, sig);
     scheduleSearch(ta);
+    autoConvert(ta);
+}
+
+// 实时翻译：刚打下分隔符（逗号/顿号/换行）时，把前一段中文原地换成英文，之后可以随意手改
+async function autoConvert(ta) {
+    if (!opt("ZhTag.AutoTranslate")) return;
+    const v = ta.value;
+    const pos = ta.selectionStart;
+    if (pos < 1 || pos !== ta.selectionEnd || !SEP.test(v[pos - 1])) return;
+    let start = pos - 1;
+    while (start > 0 && !SEP.test(v[start - 1])) start--;
+    const seg = v.slice(start, pos - 1);
+    if (!CJK.test(seg) || /<[^>]*>/.test(seg)) return;
+    const lead = seg.match(/^\s*/)[0];
+    const out = (await translateString(seg)).trim();
+    // 等翻译期间这一段被改过就放弃；之后打的字不影响
+    const cur = ta.value;
+    if (cur.slice(start, start + seg.length) !== seg || !out || out === seg.trim()) return; // 翻译失败则保留中文
+    let tail = start + seg.length;
+    let sep = cur[tail];
+    // 全角逗号/顿号顺便换成半角 ", "
+    if (sep === "，" || sep === "、") {
+        sep = cur[tail + 1] === " " ? "," : ", ";
+        tail += 1;
+    } else sep = "";
+    const insert = lead + out + sep;
+    const next = cur.slice(0, start) + insert + cur.slice(tail);
+    const caret = ta.selectionStart;
+    const delta = insert.length - (tail - start);
+    setValue(ta, next, caret >= tail ? caret + delta : caret);
+    lastSeen.set(ta, ta.value + "|" + ta.selectionStart);
 }
 
 function onInput(ev) {
