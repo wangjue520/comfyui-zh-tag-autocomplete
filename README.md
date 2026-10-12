@@ -85,6 +85,19 @@ git clone https://github.com/wangjue520/comfyui-zh-tag-autocomplete
 
 ---
 
+## 示例工作流
+
+在 [`example_workflows/`](example_workflows) 里，装好插件后也能在 ComfyUI 的「模板」里找到（自定义节点分类下）：
+
+| 工作流 | 内容 |
+| --- | --- |
+| `Anima_中文提示词体验.json` | 最简 Anima 文生图，用来体验中文补全和实时翻译 |
+| `Anima_全功能工作流_原生采样_中文_CN.json` | 原生 KSampler + 两段放大 + 脸/手等 4 个局部重绘 + Anima ControlNet-LLLite，用「功能开关」面板一键开关各分组 |
+
+两个工作流都用 Anima 模型：`anima_baseV10`（diffusion_models）、`qwen306BBaseAnima_1`（text_encoders）、`qwenImageVAE`（vae），文件名不同时在加载器里改选即可。全功能工作流需要的其他插件和 ControlNet 权重的下载地址写在工作流的「说明」节点里，其中 rgthree、Impact Pack / Subpack、controlnet_aux 可以用 Manager 的「安装缺失节点」一键安装。
+
+---
+
 ## 设置
 
 「设置」→「中文标签补全」：
