@@ -271,10 +271,25 @@ function currentToken(textarea) {
     return { start, end: pos, text: m ? raw.slice(m[0].length) : raw };
 }
 
+// 光标所在的整段（上一个分隔符之后到 pos，含前导空格）
+function segmentAt(ta, pos) {
+    const v = ta.value;
+    let start = pos;
+    while (start > 0 && !SEP.test(v[start - 1])) start--;
+    return { start, text: v.slice(start, pos) };
+}
+
+// 这一段改过（多打/删了字）就不再算被拒绝
+function isDismissed(ta, start, text) {
+    const d = state.dismissed;
+    return !!d && d.ta === ta && d.start === start && d.text === text;
+}
+
 // ---------- 弹窗 ----------
 
 let popup = null;
-const state = { textarea: null, results: [], index: 0, tokenStart: 0, tokenEnd: 0 };
+// dismissed：按 Esc 拒绝的那一段 {ta, start, text}，这段不再弹候选、打逗号时也不实时翻译
+const state = { textarea: null, results: [], index: 0, tokenStart: 0, tokenEnd: 0, dismissed: null };
 let suppressInput = false;
 let searchTimer = null;
 
@@ -534,6 +549,8 @@ function addTranslation(textarea, query, limit, source = query) {
         if (!en || state.textarea !== textarea) return;
         const tok = currentToken(textarea);
         if (!tok || tok.text.trim() !== source || document.activeElement !== textarea) return;
+        const seg = segmentAt(textarea, textarea.selectionStart);
+        if (isDismissed(textarea, seg.start, seg.text)) return; // 已按 Esc 关掉，译文晚到也不再弹出
         const results = state.results.filter((r) => !r.gt);
         const te = tagForEnglish(en);
         if (te && !results.some((r) => r.e === te)) results.unshift({ e: te, score: 0, hit: `译:${en}` });
@@ -584,6 +601,7 @@ async function autoConvert(ta) {
     while (start > 0 && !SEP.test(v[start - 1])) start--;
     const seg = v.slice(start, pos - 1);
     if (!CJK.test(seg) || /<[^>]*>/.test(seg)) return;
+    if (isDismissed(ta, start, seg)) return; // 按 Esc 拒绝过候选的这段保留中文
     const lead = seg.match(/^\s*/)[0];
     const out = (await translateString(seg)).trim();
     // 等翻译期间这一段被改过就放弃；之后打的字不影响
@@ -630,6 +648,12 @@ function onKeyDown(ev) {
         hidePopup();
         translateTextarea(ta);
         return;
+    }
+    if (ev.key === "Escape") {
+        // 弹窗还没出来（搜索在等延迟）或译文还没回来时按 Esc，也算拒绝了这一段
+        clearTimeout(searchTimer);
+        const seg = segmentAt(ta, ta.selectionStart);
+        state.dismissed = CJK.test(seg.text) ? { ta, ...seg } : null;
     }
     if (!popupOpen(ta)) return;
     const n = state.results.length;

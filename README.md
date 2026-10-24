@@ -38,7 +38,7 @@ git clone https://github.com/wangjue520/comfyui-zh-tag-autocomplete
 | ↑ / ↓ | 上下选择 |
 | PageUp / PageDown | 翻 5 项 |
 | Enter / Tab | 插入选中的标签 |
-| Esc | 关闭候选 |
+| Esc | 关闭候选，这一段保留中文（打逗号时也不实时翻译） |
 | 鼠标点击 | 插入该标签 |
 
 - 候选按「完全匹配 → 开头匹配 → 包含 → 模糊匹配」排序，同级按 Danbooru 图数从多到少排列
@@ -55,7 +55,7 @@ git clone https://github.com/wangjue520/comfyui-zh-tag-autocomplete
 一个女孩坐在窗边看书， → a girl sitting by the window reading a book, 
 ```
 
-字典能查到的用标签，查不到的（包括整句描述）用机器翻译；翻译失败时保留中文。「实时翻译」默认开启，可在设置里关闭；关闭时仍可使用 Alt+T、右键菜单或翻译节点手动转换。
+字典能查到的用标签，查不到的（包括整句描述）用机器翻译；翻译失败时保留中文。某一段想保留中文时，在打逗号前按一下 Esc。「实时翻译」默认开启，可在设置里关闭；关闭时仍可使用 Alt+T、右键菜单或翻译节点手动转换。
 
 ### 3. 一键中译英
 
