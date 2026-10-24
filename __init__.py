@@ -25,13 +25,14 @@ async def zhtac_tags(_request):
 async def zhtac_translate(request):
     q = request.query.get("q", "").strip()[:500]
     if not q:
-        return web.json_response({"text": ""})
+        return web.json_response({"text": "", "local": True})
     try:
         text = await asyncio.get_running_loop().run_in_executor(None, zh_tags.translate, q)
-        return web.json_response({"text": text})
+        return web.json_response({"text": text, "local": not text})
     except Exception as e:  # noqa: BLE001
-        print(f"[zh-tag-autocomplete] {e}")
-        return web.json_response({"text": "", "error": str(e)}, status=502)
+        # 翻译只是增强功能：即使出现意外，也不能让前端请求失败或影响本地补全。
+        print(f"[zh-tag-autocomplete] 在线翻译已跳过，继续使用本地模式: {e}")
+        return web.json_response({"text": "", "local": True})
 
 
 @routes.post("/zh_tag_autocomplete/config")

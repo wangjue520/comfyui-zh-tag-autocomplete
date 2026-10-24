@@ -3,6 +3,7 @@ import json
 import os
 import re
 import threading
+import time
 import urllib.parse
 import urllib.request
 from functools import lru_cache
@@ -49,7 +50,8 @@ def save_config(new):
                 _config[k] = v
                 changed = True
         if changed:
-            translate.cache_clear()
+            _translate_cached.cache_clear()
+            reset_online_state()
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump(_config, f, ensure_ascii=False, indent=2)
 
@@ -201,10 +203,38 @@ def deepseek_translate(text):
     return out
 
 
+ONLINE_RETRY_SECONDS = 60
+_offline_until = 0.0
+_online_lock = threading.Lock()
+
+
+def reset_online_state():
+    """设置变化时立即允许重试在线翻译。"""
+    global _offline_until
+    with _online_lock:
+        _offline_until = 0.0
+
+
+def _online_enabled():
+    with _online_lock:
+        return time.monotonic() >= _offline_until
+
+
+def _mark_online_failure(error):
+    """在线翻译失败后进入短暂本地模式，避免每个片段都重复等待超时。"""
+    global _offline_until
+    now = time.monotonic()
+    with _online_lock:
+        already_offline = now < _offline_until
+        _offline_until = now + ONLINE_RETRY_SECONDS
+    if not already_offline:
+        print(f"[zh-tag-autocomplete] 在线翻译不可用，暂时使用纯本地模式"
+              f"（{ONLINE_RETRY_SECONDS} 秒后重试）: {error}")
+
+
 @lru_cache(maxsize=4096)
-def translate(text, engine=None):
-    """返回小写译文；engine 为 None 时用设置里的引擎"""
-    engine = engine or cfg("engine")
+def _translate_cached(text, engine):
+    """只缓存成功结果；异常由外层转成空译文，不污染缓存。"""
     if engine == "关闭":
         return ""
     out = None
@@ -218,6 +248,21 @@ def translate(text, engine=None):
     return re.sub(r"[.。]+$", "", out.strip()).lower()
 
 
+def translate(text, engine=None):
+    """返回小写译文；在线失败时返回空串，让调用方保留中文并继续本地流程。"""
+    engine = engine or cfg("engine")
+    if engine == "关闭" or not _online_enabled():
+        return ""
+    try:
+        out = _translate_cached(text, engine)
+    except Exception as e:  # noqa: BLE001
+        _mark_online_failure(e)
+        return ""
+    if out:
+        reset_online_state()
+    return out
+
+
 # ---------- 整段翻译 ----------
 
 def split_weight(seg):
@@ -225,27 +270,53 @@ def split_weight(seg):
     return (m.group(1), m.group(2), m.group(3)) if m else ("", seg, "")
 
 
+CJK_PARTS = re.compile(r"([㐀-鿿豈-﫿]+)")
+
+
 def translate_prompt(text, engine=None):
-    """字典优先；查不到的中文片段（包括整句描述）交给机器翻译，失败则原样保留"""
+    """字典优先；只翻译中文部分，同段英文标签原样保留，失败时保留中文。"""
     d = get_dict()
+
+    def mixed_out(term):
+        direct = d.best_tag(term)
+        if direct:
+            return format_tag(direct)
+        parts = []
+        for part in CJK_PARTS.split(term):
+            if not part:
+                continue
+            if not CJK.search(part):
+                parts.append(part)  # 英文 tag、数字、权重及其他语法不交给机器翻译
+                continue
+            tag = d.best_tag(part)
+            if tag:
+                parts.append(format_tag(tag))
+                continue
+            try:
+                en = translate(part, engine)
+            except Exception as e:  # noqa: BLE001
+                print(f"[zh-tag-autocomplete] {e}")
+                en = ""
+            if not en:
+                parts.append(part)
+                continue
+            tag = d.tag_for_english(en)
+            parts.append(format_tag(tag) if tag else format_phrase(en))
+
+        out = ""
+        for part in parts:
+            # 中文与英文原本连写时，避免翻译后的英文和原英文 tag 粘在一起。
+            if re.search(r"[A-Za-z0-9_]$", out) and re.match(r"[A-Za-z0-9_]", part):
+                out += " "
+            out += part
+        return out
 
     def seg_out(seg):
         if not CJK.search(seg) or re.search(r"<[^>]*>", seg):
             return seg.strip()
         pre, core, post = split_weight(seg)
         term = PINYIN_RESIDUE.sub("", core.strip())
-        tag = d.best_tag(term)
-        if tag:
-            return (pre + format_tag(tag) + post).strip()
-        try:
-            en = translate(term, engine)
-        except Exception as e:  # noqa: BLE001
-            print(f"[zh-tag-autocomplete] {e}")
-            en = ""
-        if not en:
-            return seg.strip()
-        tag = d.tag_for_english(en)
-        return (pre + (format_tag(tag) if tag else format_phrase(en)) + post).strip()
+        return (pre + mixed_out(term) + post).strip()
 
     lines = []
     for line in text.split("\n"):

@@ -22,7 +22,7 @@ const SETTINGS = [
     { id: "ZhTag.AppendComma", name: "插入后自动追加逗号", type: "boolean", defaultValue: true, section: "补全" },
     { id: "ZhTag.EnglishSearch", name: "输入英文时也弹出补全（自动：已启用 pysssss 自动补全时交给它）", type: "combo", options: ["自动", "开启", "关闭"], defaultValue: "自动", section: "补全" },
     { id: "ZhTag.IncludeArtists", name: "候选中包含画师标签", type: "boolean", defaultValue: true, section: "补全" },
-    { id: "ZhTag.AutoTranslate", name: "实时翻译：打下逗号/换行时，把前一段中文原地换成英文（之后可手动修改）", type: "boolean", defaultValue: true, section: "补全" },
+    { id: "ZhTag.AutoTranslateV2", name: "实时翻译：打下逗号/换行时，把前一段中文原地换成英文（之后可手动修改）", type: "boolean", defaultValue: true, section: "补全" },
     { id: "ZhTag.Hotkey", name: "一键把中文翻译为标签的快捷键", type: "text", defaultValue: "Alt+T", section: "补全" },
     { id: "ZhTag.Engine", name: "字典里没有的中文用哪个翻译（DeepSeek 失败时自动改用谷歌）", type: "combo", options: ["谷歌", "DeepSeek", "关闭"], defaultValue: "谷歌", section: "翻译", backend: "engine" },
     { id: "ZhTag.Proxy", name: "谷歌翻译使用的代理（如 http://127.0.0.1:7890，留空则用系统环境变量）", type: "text", defaultValue: "", section: "翻译", backend: "proxy" },
@@ -386,11 +386,17 @@ function choose(i) {
     if (!r || !ta) return;
     const text = ta.value;
     let insert = r.gt ? formatPhrase(r.gt) : formatTag(r.e.tag);
+    const token = text.slice(state.tokenStart, state.tokenEnd);
+    // 候选替换只作用于中文；连写在后面、已经输完的英文 tag 不属于替换范围。
+    const suffix = CJK.test(token) ? (token.match(/[A-Za-z0-9_][A-Za-z0-9_()\\ \-]*$/)?.[0] || "") : "";
     let after = text.slice(state.tokenEnd);
-    // 吃掉光标后同一词的剩余部分
-    const rest = after.match(/^[^,，、\n()\[\]{}:<>]*/)[0];
+    const englishAfter = !suffix && CJK.test(token) && /^\s*[A-Za-z0-9_]/.test(after);
+    // 吃掉光标后同一词的剩余部分，但后面是英文 tag 时必须保留。
+    const rest = englishAfter ? "" : after.match(/^[^,，、\n()\[\]{}:<>]*/)[0];
     after = after.slice(rest.length);
-    if (opt("ZhTag.AppendComma") && !/^\s*[,，)\]}:]/.test(after)) insert += ", ";
+    if (suffix) insert += (/[A-Za-z0-9_]$/.test(insert) ? " " : "") + suffix;
+    if (englishAfter && /[A-Za-z0-9_]$/.test(insert) && /^[A-Za-z0-9_]/.test(after)) insert += " ";
+    if (!suffix && !englishAfter && opt("ZhTag.AppendComma") && !/^\s*[,，)\]}:]/.test(after)) insert += ", ";
     const before = text.slice(0, state.tokenStart);
     setValue(ta, before + insert + after, before.length + insert.length);
     hidePopup();
@@ -398,6 +404,34 @@ function choose(i) {
 }
 
 // ---------- 一键翻译 ----------
+
+// 混合片段只处理其中的中文部分，英文 tag、数字和其他语法原样保留。
+const CJK_PARTS = /([㐀-鿿豈-﫿]+)/;
+
+function joinMixed(parts) {
+    let out = "";
+    for (const part of parts) {
+        if (!part) continue;
+        // 中文与英文原本连写时，翻译后的两个英文词之间需要补一个空格。
+        if (/[A-Za-z0-9_]$/.test(out) && /^[A-Za-z0-9_]/.test(part)) out += " ";
+        out += part;
+    }
+    return out;
+}
+
+function translateMixedTerm(term) {
+    const direct = bestTagFor(term);
+    if (direct) return formatTag(direct.tag);
+    return joinMixed(term.split(CJK_PARTS).map((part) => {
+        if (!CJK.test(part)) return part;
+        const e = bestTagFor(part);
+        if (e) return formatTag(e.tag);
+        const en = gtDone.get(part);
+        if (!en) return part; // 离线或翻译失败时保留这段中文，不影响其他部分
+        const te = tagForEnglish(en);
+        return te ? formatTag(te.tag) : formatPhrase(en);
+    }));
+}
 
 // 字典优先；查不到的中文用机器翻译结果替换，没有译文则原样保留
 function translateText(text) {
@@ -411,12 +445,7 @@ function translateText(text) {
                     if (!CJK.test(seg) || /<[^>]*>/.test(seg)) return seg.trim();
                     const [pre, core, post] = splitWeight(seg);
                     const term = core.trim().replace(PINYIN_RESIDUE, "");
-                    const e = bestTagFor(term);
-                    if (e) return (pre + formatTag(e.tag) + post).trim();
-                    const en = gtDone.get(term);
-                    if (!en) return seg.trim();
-                    const te = tagForEnglish(en);
-                    return (pre + (te ? formatTag(te.tag) : formatPhrase(en)) + post).trim();
+                    return (pre + translateMixedTerm(term) + post).trim();
                 })
                 .join(", ")
                 .trimEnd(); // 行尾的逗号保留为 ","，不留多余空格
@@ -424,13 +453,15 @@ function translateText(text) {
         .join("\n");
 }
 
-// 字典里找不到的中文片段（送去机器翻译）
+// 只把字典里找不到的中文片段送去机器翻译，绝不发送同段英文 tag。
 function untranslatedTerms(text) {
     const out = new Set();
     for (const seg of text.split(/[,，、\n]/)) {
         if (!CJK.test(seg) || /<[^>]*>/.test(seg)) continue;
         const term = splitWeight(seg)[1].trim().replace(PINYIN_RESIDUE, "");
-        if (term && !bestTagFor(term)) out.add(term);
+        for (const part of term.split(CJK_PARTS)) {
+            if (part && CJK.test(part) && !bestTagFor(part)) out.add(part);
+        }
     }
     return [...out];
 }
@@ -484,20 +515,29 @@ function scheduleSearch(textarea) {
         state.results = search(tok.text, limit);
         state.index = 0;
         renderPopup();
-        if (CJK.test(tok.text)) addTranslation(textarea, tok.text.trim(), limit);
+        if (CJK.test(tok.text)) {
+            const source = tok.text.trim();
+            addTranslation(textarea, translationQuery(source), limit, source);
+        }
     }, 60);
 }
 
+// 自动补全的机器翻译候选同样只发送中文，连写的英文 tag 留在编辑器里。
+function translationQuery(source) {
+    const match = source.match(/^([㐀-鿿豈-﫿]+)\s*[A-Za-z0-9_][A-Za-z0-9_()\\ \-]*$/);
+    return match ? match[1] : source;
+}
+
 // 译文异步返回后并入候选：译文本身是标签时置顶该标签，另附一条“翻译”候选插入译文原文
-function addTranslation(textarea, query, limit) {
+function addTranslation(textarea, query, limit, source = query) {
     machineTranslate(query).then((en) => {
         if (!en || state.textarea !== textarea) return;
         const tok = currentToken(textarea);
-        if (!tok || tok.text.trim() !== query || document.activeElement !== textarea) return;
+        if (!tok || tok.text.trim() !== source || document.activeElement !== textarea) return;
         const results = state.results.filter((r) => !r.gt);
         const te = tagForEnglish(en);
         if (te && !results.some((r) => r.e === te)) results.unshift({ e: te, score: 0, hit: `译:${en}` });
-        const gtItem = { gt: en, src: query };
+        const gtItem = { gt: en, src: source };
         if (!te || normalizeTag(en) !== te.tag) {
             const strong = results.some((r) => r.score <= 1);
             if (strong) results.splice(Math.min(results.length, limit - 1), 0, gtItem);
@@ -536,7 +576,7 @@ function checkChanged(ta) {
 
 // 实时翻译：刚打下分隔符（逗号/顿号/换行）时，把前一段中文原地换成英文，之后可以随意手改
 async function autoConvert(ta) {
-    if (!opt("ZhTag.AutoTranslate")) return;
+    if (!opt("ZhTag.AutoTranslateV2")) return;
     const v = ta.value;
     const pos = ta.selectionStart;
     if (pos < 1 || pos !== ta.selectionEnd || !SEP.test(v[pos - 1])) return;

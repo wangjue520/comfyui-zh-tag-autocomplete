@@ -55,7 +55,7 @@ git clone https://github.com/wangjue520/comfyui-zh-tag-autocomplete
 一个女孩坐在窗边看书， → a girl sitting by the window reading a book, 
 ```
 
-字典能查到的用标签，查不到的（包括整句描述）用机器翻译；翻译失败时保留中文。不想要时在设置里关掉「实时翻译」。
+字典能查到的用标签，查不到的（包括整句描述）用机器翻译；翻译失败时保留中文。「实时翻译」默认开启，可在设置里关闭；关闭时仍可使用 Alt+T、右键菜单或翻译节点手动转换。
 
 ### 3. 一键中译英
 
@@ -70,7 +70,7 @@ git clone https://github.com/wangjue520/comfyui-zh-tag-autocomplete
 → black thighhighs, head out of frame, (a girl sitting by the window reading a book:1.2), <lora:xxx:0.8>
 ```
 
-权重 `(xx:1.2)`、`[xx]`、`{xx}` 和 `<lora:…>` 保持不变。
+权重 `(xx:1.2)`、`[xx]`、`{xx}` 和 `<lora:…>` 保持不变。中文与英文 tag 连写且没有逗号时，只翻译中文部分，英文 tag 原样保留，例如 `黑丝1girl` → `black thighhighs 1girl`。
 
 ### 4. 节点
 
@@ -119,6 +119,8 @@ git clone https://github.com/wangjue520/comfyui-zh-tag-autocomplete
 | DeepSeek 接口地址 / 模型名 | `https://api.deepseek.com` / `deepseek-flash` | 也可填其他 OpenAI 兼容接口 |
 
 翻译相关设置会同步保存到插件目录的 `config.json`，节点运行时也使用这份设置。
+
+在线翻译超时、断网或接口报错时，插件会自动切换为纯本地模式 60 秒：本地词典补全和翻译继续可用，词典未收录的中文原样保留，不会中断节点运行。60 秒后自动尝试恢复在线翻译；修改翻译设置会立即重新尝试。
 
 ---
 
