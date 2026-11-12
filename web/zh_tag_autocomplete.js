@@ -591,9 +591,27 @@ function checkChanged(ta) {
     autoConvert(ta);
 }
 
+// 本插件的翻译节点：框里本来就要保留中文、运行时才翻译，不做实时翻译
+const KEEP_ZH_NODES = new Set(["ZhPromptTranslate", "ZhCLIPTextEncode"]);
+
+function ownerNode(ta) {
+    const vue = ta.closest("[data-node-id]");
+    if (vue) return app.graph?.getNodeById?.(vue.getAttribute("data-node-id")) || null;
+    for (const n of app.graph?._nodes || []) {
+        if ((n.widgets || []).some((w) => (w.inputEl || w.element) === ta)) return n;
+    }
+    return null;
+}
+
+function keepsChinese(ta) {
+    const n = ownerNode(ta);
+    return !!n && KEEP_ZH_NODES.has(n.comfyClass || n.type);
+}
+
 // 实时翻译：刚打下分隔符（逗号/顿号/换行）时，把前一段中文原地换成英文，之后可以随意手改
 async function autoConvert(ta) {
     if (!opt("ZhTag.AutoTranslateV2")) return;
+    if (keepsChinese(ta)) return;
     const v = ta.value;
     const pos = ta.selectionStart;
     if (pos < 1 || pos !== ta.selectionEnd || !SEP.test(v[pos - 1])) return;
