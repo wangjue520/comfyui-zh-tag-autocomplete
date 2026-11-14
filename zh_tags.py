@@ -144,6 +144,11 @@ GOOGLE_URLS = [
     ("https://translate.googleapis.com/translate_a/single?client=gtx&sl=zh-CN&tl=en&dt=t&q={q}", "gtx"),
 ]
 
+# 在线翻译只是增强功能，不能让它长时间挡在出图流程前面。
+GOOGLE_TIMEOUT_SECONDS = 2.0
+DEEPSEEK_TIMEOUT_SECONDS = 4.0
+ONLINE_RETRY_SECONDS = 60
+
 DEEPSEEK_PROMPT = (
     "把下面这段 Stable Diffusion 提示词里的中文翻译成英文。"
     "如果它对应某个 Danbooru 标签，直接输出该标签（下划线换成空格，如 head out of frame）；"
@@ -164,7 +169,7 @@ def google_translate(text):
     for url, kind in GOOGLE_URLS:
         try:
             req = urllib.request.Request(url.format(q=q), headers={"User-Agent": "Mozilla/5.0"})
-            with _opener().open(req, timeout=8) as r:
+            with _opener().open(req, timeout=GOOGLE_TIMEOUT_SECONDS) as r:
                 data = json.loads(r.read().decode("utf-8"))
             if kind == "dict":
                 first = data[0]  # ["译文"] 或 [["译文", "zh-CN"]]
@@ -195,7 +200,7 @@ def deepseek_translate(text):
         }).encode("utf-8"),
         headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
     )
-    with urllib.request.urlopen(req, timeout=20) as r:
+    with urllib.request.urlopen(req, timeout=DEEPSEEK_TIMEOUT_SECONDS) as r:
         out = json.loads(r.read().decode("utf-8"))["choices"][0]["message"]["content"]
     out = out.strip().strip("\"'“”").strip()
     if not out:
@@ -203,13 +208,13 @@ def deepseek_translate(text):
     return out
 
 
-ONLINE_RETRY_SECONDS = 60
 _offline_until = 0.0
 _online_lock = threading.Lock()
+_online_attempt_lock = threading.Lock()
 
 
 def reset_online_state():
-    """设置变化时立即允许重试在线翻译。"""
+    """设置变化或网络恢复时立即允许重试在线翻译。"""
     global _offline_until
     with _online_lock:
         _offline_until = 0.0
@@ -218,6 +223,13 @@ def reset_online_state():
 def _online_enabled():
     with _online_lock:
         return time.monotonic() >= _offline_until
+
+
+def online_status():
+    """供前端显示状态；离线期间所有翻译都直接走本地词典。"""
+    with _online_lock:
+        remaining = max(0.0, _offline_until - time.monotonic())
+    return {"offline": remaining > 0, "retry_after": int(remaining + 0.999)}
 
 
 def _mark_online_failure(error):
@@ -254,7 +266,12 @@ def translate(text, engine=None):
     if engine == "关闭" or not _online_enabled():
         return ""
     try:
-        out = _translate_cached(text, engine)
+        # 同一时刻只尝试一个在线请求；其他请求在首个请求失败后直接走本地模式，
+        # 避免并发请求各自等待超时、占满线程池。
+        with _online_attempt_lock:
+            if not _online_enabled():
+                return ""
+            out = _translate_cached(text, engine)
     except Exception as e:  # noqa: BLE001
         _mark_online_failure(e)
         return ""

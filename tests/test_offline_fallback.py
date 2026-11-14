@@ -67,6 +67,35 @@ class OfflineFallbackTests(unittest.TestCase):
         self.assertEqual(out, "1girl一个词典里没有的描述")
         online.assert_called_once_with("一个词典里没有的描述")
 
+    def test_concurrent_requests_share_one_failure_and_report_offline(self):
+        import threading
+
+        started = threading.Event()
+        release = threading.Event()
+        results = []
+
+        def fail_after_wait(_text):
+            started.set()
+            release.wait(2)
+            raise TimeoutError("offline")
+
+        with mock.patch.object(zh_tags, "google_translate", side_effect=fail_after_wait) as online:
+            first = threading.Thread(target=lambda: results.append(zh_tags.translate("并发词甲", "谷歌")))
+            second = threading.Thread(target=lambda: results.append(zh_tags.translate("并发词乙", "谷歌")))
+            first.start()
+            self.assertTrue(started.wait(1))
+            second.start()
+            release.set()
+            first.join(2)
+            second.join(2)
+
+        self.assertFalse(first.is_alive())
+        self.assertFalse(second.is_alive())
+        self.assertEqual(results, ["", ""])
+        self.assertEqual(online.call_count, 1)
+        self.assertTrue(zh_tags.online_status()["offline"])
+        self.assertGreater(zh_tags.online_status()["retry_after"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

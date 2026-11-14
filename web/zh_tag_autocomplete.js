@@ -196,20 +196,62 @@ function bestTagFor(term) {
 
 const gtCache = new Map(); // 中文 → Promise<译文|null>
 const gtDone = new Map(); // 中文 → 译文（已完成的，供同步读取）
+let offlineUntil = 0;
+let networkStatus = null;
+
+function browserOffline() {
+    return typeof navigator !== "undefined" && navigator.onLine === false;
+}
+
+function isOffline() {
+    return browserOffline() || Date.now() < offlineUntil;
+}
+
+function updateNetworkStatus() {
+    if (typeof document === "undefined") return;
+    if (!isOffline()) {
+        if (networkStatus) networkStatus.style.display = "none";
+        return;
+    }
+    if (!networkStatus) {
+        networkStatus = document.createElement("div");
+        networkStatus.id = "zhtac-network-status";
+        networkStatus.setAttribute("role", "status");
+        document.body.appendChild(networkStatus);
+    }
+    networkStatus.textContent = "无网络连接，已切换本地翻译，不影响出图";
+    networkStatus.style.display = "block";
+}
+
+function setOffline(offline, retryAfter = 60) {
+    offlineUntil = offline ? Date.now() + Math.max(1, retryAfter) * 1000 : 0;
+    updateNetworkStatus();
+}
 
 function machineTranslate(text) {
     text = text.trim();
-    if (!text || opt("ZhTag.Engine") === "关闭") return Promise.resolve(null);
+    if (!text || opt("ZhTag.Engine") === "关闭" || isOffline()) {
+        updateNetworkStatus();
+        return Promise.resolve(null);
+    }
     if (gtCache.has(text)) return gtCache.get(text);
     const p = fetch(`/zh_tag_autocomplete/translate?q=${encodeURIComponent(text)}`)
-        .then((r) => (r.ok ? r.json() : null))
+        .then((r) => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+        })
         .then((j) => {
+            setOffline(!!(j && j.offline), j && j.retry_after);
             const t = j && j.text ? j.text.trim().replace(/[.。]+$/, "").toLowerCase() : null;
             if (t) gtDone.set(text, t);
-            else gtCache.delete(text); // 失败不缓存，下次重试
+            else gtCache.delete(text); // 失败不缓存，恢复网络后再试
             return t;
         })
-        .catch(() => { gtCache.delete(text); return null; });
+        .catch(() => {
+            gtCache.delete(text);
+            setOffline(true);
+            return null;
+        });
     gtCache.set(text, p);
     return p;
 }
@@ -713,8 +755,11 @@ function install() {
     }, true);
     // 画布平移/缩放时文本框会移动，直接关闭弹窗
     window.addEventListener("resize", hidePopup);
+    window.addEventListener("offline", () => setOffline(true));
+    window.addEventListener("online", () => setOffline(false));
     document.addEventListener("wheel", (ev) => { if (!ev.target.closest?.("#zhtac-popup")) hidePopup(); }, { capture: true, passive: true });
 
+    updateNetworkStatus();
     const link = document.createElement("link");
     link.rel = "stylesheet";
     link.href = new URL("./zh_tag_autocomplete.css", import.meta.url).href;

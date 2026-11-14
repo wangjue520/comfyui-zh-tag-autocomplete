@@ -25,14 +25,15 @@ async def zhtac_tags(_request):
 async def zhtac_translate(request):
     q = request.query.get("q", "").strip()[:500]
     if not q:
-        return web.json_response({"text": "", "local": True})
+        return web.json_response({"text": "", "local": True, "offline": False})
     try:
         text = await asyncio.get_running_loop().run_in_executor(None, zh_tags.translate, q)
-        return web.json_response({"text": text, "local": not text})
     except Exception as e:  # noqa: BLE001
         # 翻译只是增强功能：即使出现意外，也不能让前端请求失败或影响本地补全。
         print(f"[zh-tag-autocomplete] 在线翻译已跳过，继续使用本地模式: {e}")
-        return web.json_response({"text": "", "local": True})
+        zh_tags._mark_online_failure(e)
+        text = ""
+    return web.json_response({"text": text, "local": not text, **zh_tags.online_status()})
 
 
 @routes.post("/zh_tag_autocomplete/config")
@@ -58,7 +59,12 @@ class ZhPromptTranslate:
         }}
 
     def run(self, text, engine):
-        out = zh_tags.translate_prompt(text, ENGINE_MAP[engine])
+        try:
+            out = zh_tags.translate_prompt(text, ENGINE_MAP[engine])
+        except Exception as e:  # noqa: BLE001
+            # 翻译失败也必须返回有效提示词，后续 CLIP 编码和采样照常执行。
+            print(f"[zh-tag-autocomplete] 翻译已跳过，保留原文并继续出图: {e}")
+            out = text
         print(f"[zh-tag-autocomplete] {out}")
         return (out,)
 

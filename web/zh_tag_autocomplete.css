@@ -72,3 +72,20 @@
     font-size: 12px;
     opacity: 0.6;
 }
+
+#zhtac-network-status {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 100001;
+    display: none;
+    max-width: min(420px, calc(100vw - 32px));
+    padding: 9px 14px;
+    border: 1px solid #d97706;
+    border-radius: 8px;
+    background: var(--comfy-menu-bg, #353535);
+    color: #fbbf24;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+    font-size: 13px;
+    pointer-events: none;
+}

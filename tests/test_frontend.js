@@ -8,6 +8,7 @@ let extension;
 const requests = [];
 let onlineAvailable = true;
 const rows = JSON.parse(fs.readFileSync(path.join(root, "data", "tags.json"), "utf8"));
+const statusElements = [];
 
 const context = vm.createContext({
     console,
@@ -17,6 +18,10 @@ const context = vm.createContext({
         constructor(type) { this.type = type; }
     },
     window: {},
+    document: {
+        body: { appendChild: (el) => statusElements.push(el) },
+        createElement: () => ({ style: {}, setAttribute: () => {} }),
+    },
     app: {
         extensions: [],
         extensionManager: { setting: { get: () => undefined } },
@@ -61,6 +66,12 @@ async function run() {
     out = await api.translateString("1girl另一个词典里没有的描述");
     assert.equal(out, "1girl另一个词典里没有的描述", "离线时混合原文应保持不变");
     assert.equal(requests.at(-1), "另一个词典里没有的描述", "离线请求同样不能包含英文 tag");
+    const offlineRequestCount = requests.length;
+    out = await api.translateString("离线后继续使用本地词典");
+    assert.equal(out, "离线后继续使用本地词典", "未收录中文在离线时应保留");
+    assert.equal(requests.length, offlineRequestCount, "熔断期间不应继续发送在线请求");
+    assert.equal(statusElements[0].textContent, "无网络连接，已切换本地翻译，不影响出图");
+    assert.equal(statusElements[0].style.display, "block", "断网状态应显示在界面上");
 
     function chooseAt(value, tokenEnd) {
         const textarea = {
